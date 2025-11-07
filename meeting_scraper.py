@@ -348,3 +348,45 @@ class MeetingScraper:
         except Exception as e:
             print(f"Error downloading document: {e}")
             return None
+    
+    def get_document_context(self, documents: List[Dict[str, str]], max_docs: int = 3) -> str:
+        """
+        Format document URLs to provide as additional context for OpenAI.
+        OpenAI can access and parse these URLs directly.
+        
+        Args:
+            documents: List of document dictionaries with 'title' and 'url'
+            max_docs: Maximum number of documents to include
+            
+        Returns:
+            Formatted list of document URLs for OpenAI to access
+        """
+        if not documents:
+            return ""
+        
+        context_parts = []
+        context_parts.append("Meeting Documents Available:")
+        
+        # Prioritize HTML documents over PDFs for better accessibility
+        html_docs = [doc for doc in documents if 'HTML' in doc.get('title', '')]
+        pdf_docs = [doc for doc in documents if 'PDF' in doc.get('title', '')]
+        other_docs = [doc for doc in documents if doc not in html_docs and doc not in pdf_docs]
+        
+        # Process in order of preference: HTML, PDF, others
+        doc_count = 0
+        for doc_list in [html_docs, pdf_docs, other_docs]:
+            for doc in doc_list:
+                if doc_count >= max_docs:
+                    break
+                
+                context_parts.append(f"- {doc['title']}: {doc['url']}")
+                doc_count += 1
+                
+            if doc_count >= max_docs:
+                break
+        
+        if len(context_parts) > 1:  # More than just the header
+            context_parts.append("\nPlease access and review these documents to provide additional context for the meeting summary.")
+            return "\n".join(context_parts)
+        else:
+            return ""

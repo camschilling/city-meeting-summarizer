@@ -69,7 +69,7 @@ class SummarizerService:
         
         prompt_parts.append("Please provide a comprehensive summary of this city council meeting.")
         prompt_parts.append("\nThe summary should include:")
-        prompt_parts.append("1. Key topics discussed")
+        prompt_parts.append("1. Key topics and agenda items discussed")
         prompt_parts.append("2. Important decisions made")
         prompt_parts.append("3. Action items and next steps")
         prompt_parts.append("4. Public comments (if any)")
@@ -81,10 +81,22 @@ class SummarizerService:
         if meeting_date:
             prompt_parts.append(f"Date: {meeting_date}")
         
-        if additional_context:
-            prompt_parts.append(f"\n\nAdditional Context:\n{additional_context}")
+        if additional_context and additional_context.strip():
+            prompt_parts.append(f"\n\nMeeting Documents:")
+            prompt_parts.append("Please access and review the following meeting documents to provide additional context:")
+            prompt_parts.append(f"\n{additional_context}")
+            prompt_parts.append("\nUse these documents to:")
+            prompt_parts.append("- Understand the meeting agenda and planned discussion items")
+            prompt_parts.append("- Identify which agenda items were discussed vs. deferred")
+            prompt_parts.append("- Provide context for decisions and votes")
+            prompt_parts.append("- Include relevant background information from meeting packets")
         
-        prompt_parts.append(f"\n\nTranscript:\n{transcript}")
+        prompt_parts.append(f"\n\nMeeting Transcript:\n{transcript}")
+        
+        prompt_parts.append(
+            "\n\nPlease ensure the summary is well-structured, professional, and captures all significant discussions and decisions. "
+            "If the meeting documents include agenda items that weren't discussed in the transcript, please note them as 'Not discussed in this meeting' or 'Deferred to future meeting'."
+        )
         
         return "\n".join(prompt_parts)
     

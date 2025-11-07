@@ -317,13 +317,39 @@ def main():
             
             st.subheader(meeting.get('title', 'Meeting Summary'))
             
+            # Show available documents that will be included in context
+            documents = meeting.get('documents', [])
+            if documents:
+                st.markdown("### 📄 Available Documents")
+                st.info(f"The following {len(documents)} document URL(s) will be provided to OpenAI for additional context:")
+                
+                for doc in documents:
+                    doc_type = "🌐" if "HTML" in doc['title'] else "📄"
+                    st.write(f"{doc_type} [{doc['title']}]({doc['url']})")
+                
+                st.markdown("*Note: OpenAI will access and parse these documents directly to enhance the summary.*")
+                st.markdown("---")
+            
             if st.button("✨ Generate Summary", type="primary"):
                 with st.spinner("Generating AI summary..."):
+                    # Include document URLs as additional context if available
+                    additional_context = ""
+                    documents = meeting.get('documents', [])
+                    
+                    if documents:
+                        st.info("📄 Including meeting document URLs for OpenAI to access...")
+                        additional_context = scraper.get_document_context(documents, max_docs=3)
+                        
+                        if additional_context:
+                            st.success(f"✅ Including {min(len(documents), 3)} document URL(s) for OpenAI to review")
+                        else:
+                            st.warning("⚠️ No documents available to include")
+                    
                     summary = summarizer.summarize_meeting(
                         transcript=transcript,
                         meeting_title=meeting.get('title', ''),
                         meeting_date=meeting.get('date', ''),
-                        additional_context=""
+                        additional_context=additional_context
                     )
                     
                     if summary:
