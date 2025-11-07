@@ -144,6 +144,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# Application specific
+*.txt.download
+meeting_summary_*.txt
+
 # Spyder project settings
 .spyderproject
 .spyproject
