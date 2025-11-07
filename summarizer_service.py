@@ -93,7 +93,10 @@ class SummarizerService:
         
         prompt_parts.append(f"\n\nMeeting Transcript:\n{transcript}")
         
-        prompt_parts.append("\n\nPlease ensure the summary is well-structured, professional, and captures all significant discussions and decisions. If the meeting documents include agenda items that weren't discussed in the transcript, please note them as 'Not discussed in this meeting' or 'Deferred to future meeting'.")
+        prompt_parts.append(
+            "\n\nPlease ensure the summary is well-structured, professional, and captures all significant discussions and decisions. "
+            "If the meeting documents include agenda items that weren't discussed in the transcript, please note them as 'Not discussed in this meeting' or 'Deferred to future meeting'."
+        )
         
         return "\n".join(prompt_parts)
     
