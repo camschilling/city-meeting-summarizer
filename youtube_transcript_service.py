@@ -99,28 +99,6 @@ class YouTubeTranscriptService:
             print(f"Error using YouTube Transcript API: {e}")
             return None
     
-    def get_available_languages(self, youtube_url: str) -> List[str]:
-        """Get list of available transcript languages for a YouTube video"""
-        try:
-            if not YOUTUBE_API_AVAILABLE:
-                return []
-            
-            video_id = self.extract_video_id(youtube_url)
-            if not video_id:
-                return []
-            
-            api = YouTubeTranscriptApi()
-            transcript_list = api.list(video_id)
-            
-            languages = []
-            for transcript in transcript_list:
-                languages.append(f"{transcript.language} ({transcript.language_code})")
-            
-            return languages
-            
-        except Exception as e:
-            print(f"Error getting available languages: {e}")
-            return []
     
     def _get_manual_instructions(self, youtube_url: str) -> str:
         """Return manual transcription instructions"""
