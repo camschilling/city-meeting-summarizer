@@ -341,7 +341,7 @@ def main():
                         additional_context = scraper.get_document_context(documents, max_docs=3)
                         
                         if additional_context:
-                            st.success(f"✅ Including {len(documents)} document URL(s) for OpenAI to review")
+                            st.success(f"✅ Including {min(len(documents), 3)} document URL(s) for OpenAI to review")
                         else:
                             st.warning("⚠️ No documents available to include")
                     
