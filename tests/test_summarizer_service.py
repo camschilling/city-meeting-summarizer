@@ -228,6 +228,102 @@ class TestSummarizerService:
         assert "video transcript to accurately and contextually summarize" in system_message
         assert "decisions, discussions, and action items" in system_message
         assert "spelling mistakes" in system_message
+    
+    def test_create_chat_context(self, summarizer_service):
+        """Test chat context creation with full information."""
+        summary = "Test meeting summary"
+        transcript = "Test transcript content"
+        additional_context = "Test document context"
+        documents = [
+            {'title': 'Agenda', 'url': 'https://example.com/agenda.html'},
+            {'title': 'Minutes', 'url': 'https://example.com/minutes.html'}
+        ]
+        sources_used = "Video transcript, Meeting documents"
+        
+        context = summarizer_service.create_chat_context(
+            summary=summary,
+            meeting_title="Test Meeting",
+            meeting_date="2024-01-15",
+            transcript=transcript,
+            additional_context=additional_context,
+            documents=documents,
+            sources_used=sources_used
+        )
+        
+        assert "MEETING SUMMARY:" in context
+        assert summary in context
+        assert "FULL MEETING TRANSCRIPT:" in context
+        assert transcript in context
+        assert "MEETING DOCUMENTS AND CONTEXT:" in context
+        assert additional_context in context
+        assert "DOCUMENT REFERENCES:" in context
+        assert "https://example.com/agenda.html" in context
+        assert "SOURCES USED FOR THIS SUMMARY:" in context
+        assert sources_used in context
+        assert "MEETING TITLE: Test Meeting" in context
+        assert "MEETING DATE: 2024-01-15" in context
+    
+    def test_create_chat_context_minimal(self, summarizer_service):
+        """Test chat context creation with minimal information."""
+        summary = "Test summary"
+        
+        context = summarizer_service.create_chat_context(
+            summary=summary,
+            meeting_title="",
+            meeting_date="",
+            transcript="",
+            additional_context="",
+            documents=None,
+            sources_used=""
+        )
+        
+        assert "MEETING SUMMARY:" in context
+        assert summary in context
+        assert "MEETING TRANSCRIPT: Not available" in context
+        assert "MEETING DOCUMENTS: No additional documents were available" in context
+    
+    def test_chat_response_success(self, summarizer_service, mock_openai_response):
+        """Test successful chat response generation."""
+        summarizer_service.client.chat.completions.create.return_value = mock_openai_response
+        mock_openai_response.choices[0].message.content = "Test chat response"
+        
+        chat_history = [
+            {"role": "system", "content": "System context"},
+            {"role": "assistant", "content": "Initial message"}
+        ]
+        
+        response = summarizer_service.chat_response(
+            user_message="Test question",
+            chat_history=chat_history
+        )
+        
+        assert response == "Test chat response"
+        
+        # Verify the API was called with correct parameters
+        summarizer_service.client.chat.completions.create.assert_called_once()
+        call_args = summarizer_service.client.chat.completions.create.call_args
+        assert call_args[1]['model'] == summarizer_service.model
+        assert call_args[1]['temperature'] == 0.3
+        assert call_args[1]['max_tokens'] == 1000
+        
+        # Check that user message was added to conversation
+        messages = call_args[1]['messages']
+        assert len(messages) == 3
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["content"] == "Test question"
+    
+    def test_chat_response_api_error(self, summarizer_service):
+        """Test chat response with API error."""
+        summarizer_service.client.chat.completions.create.side_effect = Exception("API Error")
+        
+        chat_history = [{"role": "system", "content": "System context"}]
+        
+        response = summarizer_service.chat_response(
+            user_message="Test question",
+            chat_history=chat_history
+        )
+        
+        assert response is None
 
 
 if __name__ == "__main__":

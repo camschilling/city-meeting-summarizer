@@ -106,28 +106,19 @@ def get_transcript(video_url: str, scraper, transcript_service, youtube_service,
     return transcript
 
 
-def chat_with_ai(summarizer, summary, meeting_title, transcript=None, additional_context=None):
-    """Handle the chat interface with OpenAI with full context."""
+def chat_with_ai(summarizer, summary, meeting_title, transcript=None, additional_context=None, documents=None, sources_used=None, meeting_date=None):
+    """Handle the chat interface using SummarizerService's chat functionality."""
     
-    # Build comprehensive system context
-    system_context = f"""You are an AI assistant with complete access to a city meeting's information. You have:
-
-1. MEETING SUMMARY: {summary}
-
-2. FULL TRANSCRIPT: {transcript if transcript else "Not available"}
-
-3. DOCUMENT CONTEXT: {additional_context if additional_context else "No additional documents were available"}
-
-You can answer detailed questions about:
-- Specific quotes and statements from the transcript
-- Context around decisions and discussions
-- Background information from meeting documents
-- Detailed analysis of topics discussed
-- Action items and their context
-- Public comments and concerns raised
-- Voting records and rationale
-
-Provide comprehensive, accurate responses based on this complete information."""
+    # Create comprehensive system context using the summarizer's method
+    system_context = summarizer.create_chat_context(
+        summary=summary,
+        meeting_title=meeting_title,
+        meeting_date=meeting_date or "",
+        transcript=transcript or "",
+        additional_context=additional_context or "",
+        documents=documents,
+        sources_used=sources_used or ""
+    )
     
     # Initialize chat history in session state with unique key
     chat_key = f"chat_messages_{meeting_title}"
@@ -145,72 +136,58 @@ Provide comprehensive, accurate responses based on this complete information."""
     
     # Chat input
     if prompt := st.chat_input("Ask me about this meeting...", key=f"chat_input_{meeting_title}"):
-        # Add user message
+        # Add user message to display
         st.session_state[chat_key].append({"role": "user", "content": prompt})
         
         # Display user message immediately
         with st.chat_message("user"):
             st.write(prompt)
         
-        # Get AI response
+        # Get AI response using the summarizer's chat method
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                try:
-                    response = summarizer.client.chat.completions.create(
-                        model=summarizer.model,
-                        messages=st.session_state[chat_key],
-                        temperature=0.3,
-                        max_tokens=1000
-                    )
-                    
-                    ai_response = response.choices[0].message.content
+                ai_response = summarizer.chat_response(
+                    user_message=prompt,
+                    chat_history=st.session_state[chat_key]
+                )
+                
+                if ai_response:
                     st.write(ai_response)
-                    
                     # Add AI response to chat history
                     st.session_state[chat_key].append({"role": "assistant", "content": ai_response})
-                    
-                except Exception as e:
-                    error_msg = f"Sorry, I encountered an error: {str(e)}"
+                else:
+                    error_msg = "Sorry, I encountered an error generating a response."
                     st.error(error_msg)
                     st.session_state[chat_key].append({"role": "assistant", "content": error_msg})
     
-        # Add a clear chat button
-        if len(chat_messages) > 2:  # More than just system and initial assistant messages
-            if st.button("🗑️ Clear Chat History", key=f"clear_chat_{meeting_title}"):
-                # Build comprehensive system context
-                system_context = f"""You are an AI assistant with complete access to a city meeting's information. You have:
-
-1. MEETING SUMMARY: {summary}
-
-2. FULL TRANSCRIPT: {transcript if 'transcript' in locals() else st.session_state.get('current_transcript', 'Not available')}
-
-3. DOCUMENT CONTEXT: {additional_context if 'additional_context' in locals() else "No additional documents were available"}
-
-You can answer detailed questions about:
-- Specific quotes and statements from the transcript
-- Context around decisions and discussions
-- Background information from meeting documents
-- Detailed analysis of topics discussed
-- Action items and their context
-- Public comments and concerns raised
-- Voting records and rationale
-
-Provide comprehensive, accurate responses based on this complete information."""
-
-                # Reset to initial state with full context
-                st.session_state[chat_key] = [
-                    {"role": "system", "content": system_context},
-                    {"role": "assistant", "content": f"# 📋 {meeting_title} Summary\n\n{summary}\n\n---\n\n💬 **Please feel free to ask me any follow-up questions about this meeting!**"}
-                ]
-                st.rerun()
+    # Add a clear chat button
+    if len(chat_messages) > 2:  # More than just system and initial assistant messages
+        if st.button("🗑️ Clear Chat History", key=f"clear_chat_{meeting_title}"):
+            # Recreate the comprehensive system context using the summarizer's method
+            system_context = summarizer.create_chat_context(
+                summary=summary,
+                meeting_title=meeting_title,
+                meeting_date=meeting_date or "",
+                transcript=transcript or "",
+                additional_context=additional_context or "",
+                documents=documents,
+                sources_used=sources_used or ""
+            )
+            
+            # Reset to initial state with full context
+            st.session_state[chat_key] = [
+                {"role": "system", "content": system_context},
+                {"role": "assistant", "content": f"# 📋 {meeting_title} Summary\n\n{summary}\n\n---\n\n💬 **Please feel free to ask me any follow-up questions about this meeting!**"}
+            ]
+            st.rerun()
 
 def main():
     st.title("Snoqualmie City Meeting Summarizer")
     st.markdown("""
-                Select a meeting below to have AI (ChatGPT) generate a recent Snoqualmie city meeting summary and start a chat!
-                *This application uses available YouTube video recordings, 
+                Select a meeting below to have AI (ChatGPT) generate a recent Snoqualmie city meeting summary and start a chat! 
+                This tool is designed to help citizens stay informed about local government decisions
+                and uses available YouTube video recordings, 
                 meeting minutes, agendas, and packets to produce comprehensive meeting summaries.
-                Only the most recent 25 meetings are available.
                 You are then able to ask follow up questions and save the chat.
                 As with any use of AI, there may be errors.
                 This tool can be used for brief summaries of meetings
@@ -218,6 +195,11 @@ def main():
                 Talk to your [Council Members](https://www.snoqualmiewa.gov/526/City-Council)!*
                 """
     )
+    # Contact information
+    st.markdown("""
+    If you have questions, encounter any issues, or have suggestions for improvement, 
+    please feel free to reach out: [cam.schilling@gmail.com](mailto:cam.schilling@gmail.com)
+    """)   
     st.markdown("---")
     
     # Check API keys
@@ -284,15 +266,26 @@ def main():
         # Get the full context for richer chat experience
         current_transcript = st.session_state.get('current_transcript', '')
         
-        # Get the document context that was used for this meeting
+        # Get comprehensive document context for chat (more than the 3 used for summary)
         meeting_documents = meeting.get('documents', [])
         document_context = ""
         if meeting_documents:
-            # Try to get the same document context that was used in summarization
-            document_context = scraper.get_document_context(meeting_documents, max_docs=3)
+            # Get more comprehensive document context for chat (up to 5 documents)
+            document_context = scraper.get_document_context(meeting_documents, max_docs=5)
         
-        chat_with_ai(summarizer, summary, meeting.get('title', 'Meeting'), 
-                    transcript=current_transcript, additional_context=document_context)
+        # Get sources used information
+        sources_used = st.session_state.get('summary_sources', '')
+        
+        chat_with_ai(
+            summarizer=summarizer, 
+            summary=summary, 
+            meeting_title=meeting.get('title', 'Meeting'),
+            transcript=current_transcript, 
+            additional_context=document_context,
+            documents=meeting_documents,
+            sources_used=sources_used,
+            meeting_date=meeting.get('date', '')
+        )
         
         # Show documents that were included (compact view)
         documents = meeting.get('documents', [])
@@ -512,18 +505,6 @@ def main():
                 st.success("✅ **TranscriptAPI** configured")
             else:
                 st.warning("⚠️ **TranscriptAPI** not configured")
-
-    # Contact information
-    st.markdown("---")
-    st.markdown("### 📧 Questions or Issues?")
-    st.markdown("""
-    If you have questions, encounter any issues, or have suggestions for improvement, 
-    please feel free to reach out:
-    
-    **Contact:** [cam.schilling@gmail.com](mailto:cam.schilling@gmail.com)
-    
-    *This tool is designed to help citizens stay informed about local government decisions.*
-    """)
 
 
 if __name__ == "__main__":
