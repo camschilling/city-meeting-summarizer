@@ -75,7 +75,10 @@ class MeetingScraper:
                             doc_links = cell.find_all('a')
                             for doc_link in doc_links:
                                 doc_url = doc_link.get('href', '')
-                                if doc_url:
+                                doc_text = doc_link.get_text(strip=True)
+                                
+                                # Only add documents with valid URLs and meaningful text
+                                if doc_url and doc_text and doc_text.lower() not in ['', 'n/a', 'none', 'na']:
                                     if not doc_url.startswith('http'):
                                         doc_url = self.base_url + doc_url
                                     
