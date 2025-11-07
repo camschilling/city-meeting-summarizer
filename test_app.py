@@ -56,6 +56,11 @@ class TestTranscriptService(unittest.TestCase):
         """Test TranscriptService initialization."""
         self.assertEqual(self.service.api_key, "test_api_key")
         self.assertIn('Authorization', self.service.headers)
+        
+    def test_init_with_custom_url(self):
+        """Test TranscriptService initialization with custom URL."""
+        service = TranscriptService("test_key", "https://custom.api.com/v1")
+        self.assertEqual(service.base_url, "https://custom.api.com/v1")
     
     @patch('transcript_service.requests.post')
     def test_transcribe_video_success(self, mock_post):

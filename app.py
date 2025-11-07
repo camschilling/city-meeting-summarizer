@@ -21,9 +21,10 @@ def init_services():
     """Initialize all services with API keys."""
     openai_key = os.getenv('OPENAI_API_KEY')
     transcript_key = os.getenv('TRANSCRIPTAPI_KEY')
+    transcript_url = os.getenv('TRANSCRIPTAPI_URL', 'https://api.transcriptapi.com/v1')
     
     scraper = MeetingScraper()
-    transcript_service = TranscriptService(transcript_key) if transcript_key else None
+    transcript_service = TranscriptService(transcript_key, transcript_url) if transcript_key else None
     summarizer = SummarizerService(openai_key) if openai_key else None
     
     return scraper, transcript_service, summarizer

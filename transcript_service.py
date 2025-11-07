@@ -5,11 +5,22 @@ import os
 
 
 class TranscriptService:
-    """Service for transcribing videos using transcriptapi.com."""
+    """Service for transcribing videos using transcriptapi.com.
     
-    def __init__(self, api_key: str):
+    Note: The base_url should be configured to match your transcription service's API.
+    The default URL is a placeholder and should be verified with your service provider.
+    """
+    
+    def __init__(self, api_key: str, base_url: str = "https://api.transcriptapi.com/v1"):
+        """
+        Initialize the TranscriptService.
+        
+        Args:
+            api_key: API key for the transcription service
+            base_url: Base URL for the transcription API (default is a placeholder)
+        """
         self.api_key = api_key
-        self.base_url = "https://api.transcriptapi.com/v1"  # Placeholder URL
+        self.base_url = base_url
         self.headers = {
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json'
