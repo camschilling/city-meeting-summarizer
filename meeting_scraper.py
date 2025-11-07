@@ -4,6 +4,8 @@ from typing import List, Dict, Optional
 import re
 from datetime import datetime, timedelta
 from dateutil import parser as date_parser
+import time
+import random
 
 
 class MeetingScraper:
@@ -13,8 +15,36 @@ class MeetingScraper:
         self.base_url = base_url
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         })
+        # Add retry configuration
+        self.max_retries = 3
+        self.retry_delay = 2
+    
+    def _make_request_with_retry(self, url: str, **kwargs) -> requests.Response:
+        """Make HTTP request with retry logic."""
+        for attempt in range(self.max_retries):
+            try:
+                if attempt > 0:
+                    delay = self.retry_delay * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                    print(f"Retrying request to {url} in {delay:.1f} seconds (attempt {attempt + 1}/{self.max_retries})")
+                    time.sleep(delay)
+                
+                response = self.session.get(url, **kwargs)
+                response.raise_for_status()
+                return response
+                
+            except requests.exceptions.RequestException as e:
+                if attempt == self.max_retries - 1:
+                    raise e
+                print(f"Request failed (attempt {attempt + 1}/{self.max_retries}): {e}")
+        
+        raise requests.exceptions.RequestException("Max retries exceeded")
     
     def get_meetings(self) -> List[Dict[str, str]]:
         """
@@ -24,8 +54,9 @@ class MeetingScraper:
             List of meeting dictionaries with title, date, video_url, and documents
         """
         try:
-            response = self.session.get(self.base_url)
-            response.raise_for_status()
+            print(f"Fetching meetings list from: {self.base_url}")
+            response = self._make_request_with_retry(self.base_url, timeout=30)
+            print(f"Successfully fetched meetings page (status: {response.status_code})")
             
             soup = BeautifulSoup(response.content, 'html.parser')
             meetings = []
@@ -95,8 +126,11 @@ class MeetingScraper:
                         
                         meetings.append(meeting)
             
+            print(f"Successfully extracted {len(meetings)} meetings from table")
+            
             # Fallback: look for meeting-related links if table method fails
             if not meetings:
+                print("No meetings found in table, trying fallback method...")
                 meeting_links = soup.find_all('a', href=re.compile(r'(meeting|council|commission)', re.IGNORECASE))
                 
                 for link in meeting_links:
@@ -119,8 +153,19 @@ class MeetingScraper:
                         'documents': []
                     }
                     meetings.append(meeting)
+                
+                print(f"Fallback method found {len(meetings)} meetings")
             
             return meetings
+        except requests.exceptions.Timeout:
+            print(f"Timeout error fetching meetings from: {self.base_url}")
+            return []
+        except requests.exceptions.ConnectionError:
+            print(f"Connection error fetching meetings from: {self.base_url}")
+            return []
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP error {e.response.status_code} fetching meetings from: {self.base_url}")
+            return []
         except Exception as e:
             print(f"Error fetching meetings: {e}")
             return []
@@ -174,8 +219,9 @@ class MeetingScraper:
             Dictionary with meeting details including video URL and documents
         """
         try:
-            response = self.session.get(meeting_url)
-            response.raise_for_status()
+            print(f"Fetching meeting details from: {meeting_url}")
+            response = self._make_request_with_retry(meeting_url, timeout=30)
+            print(f"Successfully fetched meeting page (status: {response.status_code})")
             
             soup = BeautifulSoup(response.content, 'html.parser')
             
@@ -190,19 +236,24 @@ class MeetingScraper:
             title_elem = soup.find('h1') or soup.find('title')
             if title_elem:
                 details['title'] = title_elem.get_text(strip=True)
+                print(f"Extracted title: {details['title']}")
             
             # Extract date - look for various date patterns
             date_elem = soup.find(class_=re.compile(r'date', re.I)) or soup.find(string=re.compile(r'\d{1,2}/\d{1,2}/\d{4}'))
             if date_elem:
                 details['date'] = date_elem if isinstance(date_elem, str) else date_elem.get_text(strip=True)
+                print(f"Extracted date: {details['date']}")
             
             # Extract video URL with improved logic
             video_url = self._extract_video_url(soup)
             if video_url:
                 details['video_url'] = video_url
+                print(f"Extracted video URL: {video_url}")
             
             # Extract document links
             doc_links = soup.find_all('a', href=re.compile(r'\.(pdf|doc|docx)$', re.I))
+            print(f"Found {len(doc_links)} document links")
+            
             for link in doc_links:
                 doc_url = link.get('href', '')
                 if doc_url and not doc_url.startswith('http'):
@@ -225,9 +276,20 @@ class MeetingScraper:
                     'url': doc_url
                 })
             
+            print(f"Successfully extracted meeting details: {len(details['documents'])} documents found")
             return details
+            
+        except requests.exceptions.Timeout:
+            print(f"Timeout error fetching meeting details from: {meeting_url}")
+            return {}
+        except requests.exceptions.ConnectionError:
+            print(f"Connection error fetching meeting details from: {meeting_url}")
+            return {}
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP error {e.response.status_code} fetching meeting details from: {meeting_url}")
+            return {}
         except Exception as e:
-            print(f"Error fetching meeting details: {e}")
+            print(f"Error fetching meeting details from {meeting_url}: {e}")
             return {}
     
     def _extract_video_url(self, soup) -> str:
