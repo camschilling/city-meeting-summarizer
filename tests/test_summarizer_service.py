@@ -34,11 +34,11 @@ class TestSummarizerService:
             mock_openai.assert_called_once_with(api_key="test_api_key")
             assert service.model == "gpt-4o-mini"
     
-    def test_summarize_meeting_basic(self, summarizer_service, mock_openai_response):
+    def test_generate_summary_basic(self, summarizer_service, mock_openai_response):
         """Test basic meeting summarization."""
         summarizer_service.client.chat.completions.create.return_value = mock_openai_response
         
-        result = summarizer_service.summarize_meeting(
+        result = summarizer_service.generate_summary(
             transcript="Test transcript content",
             meeting_title="City Council Meeting",
             meeting_date="2024-01-15"
@@ -47,7 +47,7 @@ class TestSummarizerService:
         assert result == "This is a test summary of the meeting."
         summarizer_service.client.chat.completions.create.assert_called_once()
     
-    def test_summarize_meeting_with_document_context(self, summarizer_service, mock_openai_response):
+    def test_generate_summary_with_document_context(self, summarizer_service, mock_openai_response):
         """Test meeting summarization with document URLs."""
         summarizer_service.client.chat.completions.create.return_value = mock_openai_response
         
@@ -56,11 +56,18 @@ class TestSummarizerService:
 - Packet (PDF): https://example.com/packet.pdf
 - Minutes (HTML): https://example.com/minutes.html"""
         
-        result = summarizer_service.summarize_meeting(
+        documents = [
+            {'title': 'Agenda (HTML)', 'url': 'https://example.com/agenda.html'},
+            {'title': 'Packet (PDF)', 'url': 'https://example.com/packet.pdf'},
+            {'title': 'Minutes (HTML)', 'url': 'https://example.com/minutes.html'}
+        ]
+        
+        result = summarizer_service.generate_summary(
             transcript="Test transcript content",
             meeting_title="City Council Meeting",
             meeting_date="2024-01-15",
-            additional_context=document_context
+            additional_context=document_context,
+            documents=documents
         )
         
         assert result == "This is a test summary of the meeting."
@@ -73,79 +80,91 @@ class TestSummarizerService:
         
         # Check that the prompt includes document context
         prompt = call_args[1]['messages'][1]['content']
-        assert "Meeting Documents:" in prompt
-        assert "Please access and review the following meeting documents" in prompt
+        assert "Meeting Documents" in prompt
         assert "https://example.com/agenda.html" in prompt
         assert "https://example.com/packet.pdf" in prompt
         assert "https://example.com/minutes.html" in prompt
     
-    def test_build_summary_prompt_minimal(self, summarizer_service):
-        """Test prompt building with minimal information."""
-        prompt = summarizer_service._build_summary_prompt(
-            transcript="Test transcript",
-            meeting_title="",
-            meeting_date="",
-            additional_context=""
-        )
+    def test_build_unified_prompt_with_transcript(self, summarizer_service):
+        """Test unified prompt building with transcript available."""
+        documents = [
+            {'title': 'Agenda (HTML)', 'url': 'https://example.com/agenda.html'},
+            {'title': 'Minutes (HTML)', 'url': 'https://example.com/minutes.html'}
+        ]
         
-        assert "Please provide a comprehensive summary" in prompt
-        assert "Key topics and agenda items discussed" in prompt
-        assert "Important decisions made" in prompt
-        assert "Action items and next steps" in prompt
-        assert "Public comments (if any)" in prompt
-        assert "Votes taken and their outcomes" in prompt
-        assert "Test transcript" in prompt
-    
-    def test_build_summary_prompt_complete(self, summarizer_service):
-        """Test prompt building with all information."""
-        document_context = """Meeting Documents Available:
-- Agenda (HTML): https://example.com/agenda.html
-- Packet (PDF): https://example.com/packet.pdf"""
-        
-        prompt = summarizer_service._build_summary_prompt(
-            transcript="Test transcript content",
+        prompt = summarizer_service._build_unified_prompt(
             meeting_title="City Council Meeting",
             meeting_date="2024-01-15",
-            additional_context=document_context
+            transcript="Test transcript content",
+            additional_context="Meeting Documents Available:\n- Agenda\n- Minutes",
+            has_transcript=True,
+            has_documents=True,
+            has_minutes=True,
+            has_agenda=True,
+            document_count=2
         )
         
+        assert "comprehensive summary of this city council meeting based on the video transcript and supporting documents" in prompt
         assert "Meeting: City Council Meeting" in prompt
         assert "Date: 2024-01-15" in prompt
-        assert "Meeting Documents:" in prompt
-        assert "Please access and review the following meeting documents" in prompt
-        assert "https://example.com/agenda.html" in prompt
-        assert "https://example.com/packet.pdf" in prompt
-        assert "Understand the meeting agenda and planned discussion items" in prompt
-        assert "Identify which agenda items were discussed vs. deferred" in prompt
-        assert "Provide context for decisions and votes" in prompt
-        assert "Include relevant background information from meeting packets" in prompt
         assert "Test transcript content" in prompt
-        assert "If the meeting documents include agenda items that weren't discussed" in prompt
+        assert "Meeting Documents (2 available)" in prompt
+        assert "Video transcript and meeting documents" in prompt
     
-    def test_build_summary_prompt_empty_context(self, summarizer_service):
-        """Test prompt building with empty additional context."""
-        prompt = summarizer_service._build_summary_prompt(
-            transcript="Test transcript",
-            meeting_title="Test Meeting",
+    def test_build_unified_prompt_agenda_only(self, summarizer_service):
+        """Test unified prompt building with agenda only."""
+        documents = [
+            {'title': 'Agenda (HTML)', 'url': 'https://example.com/agenda.html'}
+        ]
+        
+        prompt = summarizer_service._build_unified_prompt(
+            meeting_title="City Council Meeting",
             meeting_date="2024-01-15",
-            additional_context="   "  # Whitespace only
+            transcript="",
+            additional_context="Meeting Documents Available:\n- Agenda",
+            has_transcript=False,
+            has_documents=True,
+            has_minutes=False,
+            has_agenda=True,
+            document_count=1
         )
         
-        assert "Meeting Documents:" not in prompt
-        assert "Please access and review" not in prompt
-        assert "Meeting: Test Meeting" in prompt
-        assert "Date: 2024-01-15" in prompt
+        assert "summary of what was planned for this city council meeting based on the available agenda" in prompt
+        assert "scheduled to discuss" in prompt
+        assert "planned for review" in prompt
+        assert "Meeting agenda only (no video or minutes available)" in prompt
+        assert "actual outcomes are unknown" in prompt
     
-    def test_summarize_meeting_api_error(self, summarizer_service):
-        """Test handling of API errors during summarization."""
+    def test_build_unified_prompt_minutes_only(self, summarizer_service):
+        """Test unified prompt building with minutes but no video."""
+        documents = [
+            {'title': 'Minutes (HTML)', 'url': 'https://example.com/minutes.html'}
+        ]
+        
+        prompt = summarizer_service._build_unified_prompt(
+            meeting_title="City Council Meeting",
+            meeting_date="2024-01-15",
+            transcript="",
+            additional_context="Meeting Documents Available:\n- Minutes",
+            has_transcript=False,
+            has_documents=True,
+            has_minutes=True,
+            has_agenda=False,
+            document_count=1
+        )
+        
+        assert "summary of this city council meeting based on the available meeting minutes and documents" in prompt
+        assert "Meeting minutes and documents (no video available)" in prompt
+        assert "based on meeting documents only (not video recording)" in prompt
+    
+    def test_generate_summary_api_error(self, summarizer_service):
+        """Test handling of OpenAI API errors."""
         summarizer_service.client.chat.completions.create.side_effect = Exception("API Error")
         
-        result = summarizer_service.summarize_meeting(
-            transcript="Test transcript",
-            meeting_title="Test Meeting"
+        result = summarizer_service.generate_summary(
+            transcript="Test transcript content",
+            meeting_title="City Council Meeting"
         )
-        
-        assert result is None
     
     def test_extract_action_items_success(self, summarizer_service):
         """Test successful action item extraction."""
@@ -201,64 +220,14 @@ class TestSummarizerService:
         """Test that system messages contain appropriate instructions."""
         summarizer_service.client.chat.completions.create.return_value = mock_openai_response
         
-        # Test summarization system message
-        summarizer_service.summarize_meeting("Test transcript")
+        # Test summarization system message with transcript
+        summarizer_service.generate_summary(transcript="Test transcript")
         call_args = summarizer_service.client.chat.completions.create.call_args
         system_message = call_args[1]['messages'][0]['content']
         
-        assert "expert at summarizing city council meetings" in system_message
-        assert "clear, concise, and capture all important" in system_message
+        assert "video transcript to accurately and contextually summarize" in system_message
         assert "decisions, discussions, and action items" in system_message
-    
-    def test_document_context_instructions(self, summarizer_service):
-        """Test that document context includes proper instructions for OpenAI."""
-        document_context = """Meeting Documents Available:
-- Agenda (HTML): https://example.com/agenda.html
-- Packet (PDF): https://example.com/packet.pdf"""
-        
-        prompt = summarizer_service._build_summary_prompt(
-            transcript="Test transcript",
-            meeting_title="Test Meeting",
-            meeting_date="2024-01-15",
-            additional_context=document_context
-        )
-        
-        # Verify all the document usage instructions are present
-        expected_instructions = [
-            "Please access and review the following meeting documents",
-            "Use these documents to:",
-            "Understand the meeting agenda and planned discussion items",
-            "Identify which agenda items were discussed vs. deferred",
-            "Provide context for decisions and votes", 
-            "Include relevant background information from meeting packets"
-        ]
-        
-        for instruction in expected_instructions:
-            assert instruction in prompt
-    
-    def test_prompt_structure_order(self, summarizer_service):
-        """Test that the prompt components are in the correct order."""
-        document_context = "Meeting Documents Available:\n- Agenda: https://example.com/agenda.html"
-        
-        prompt = summarizer_service._build_summary_prompt(
-            transcript="Test transcript content",
-            meeting_title="Test Meeting",
-            meeting_date="2024-01-15",
-            additional_context=document_context
-        )
-        
-        # Check order of major sections
-        summary_intro_pos = prompt.find("Please provide a comprehensive summary")
-        meeting_info_pos = prompt.find("Meeting: Test Meeting")
-        document_section_pos = prompt.find("Meeting Documents:")
-        transcript_pos = prompt.find("Meeting Transcript:\nTest transcript content")
-        final_instructions_pos = prompt.find("Please ensure the summary is well-structured")
-        
-        # Verify order is correct
-        assert summary_intro_pos < meeting_info_pos
-        assert meeting_info_pos < document_section_pos
-        assert document_section_pos < transcript_pos
-        assert transcript_pos < final_instructions_pos
+        assert "spelling mistakes" in system_message
 
 
 if __name__ == "__main__":

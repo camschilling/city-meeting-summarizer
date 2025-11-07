@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
+from typing import Dict, Optional
 from meeting_scraper import MeetingScraper
 from transcript_service import TranscriptService
 from summarizer_service import SummarizerService
@@ -37,6 +38,60 @@ def load_meetings():
     scraper = MeetingScraper()
     return scraper.get_meetings()
 
+
+def get_transcript(video_url: str, scraper, transcript_service, youtube_service, status) -> Optional[str]:
+    """Get transcript from video URL with proper error handling."""
+    transcript = None
+    
+    # Try YouTube transcript service first
+    platform = scraper.get_video_platform(video_url)
+    if platform == "YouTube":
+        youtube_transcript = youtube_service.get_transcript(video_url)
+        
+        if youtube_transcript and "MANUAL TRANSCRIPTION REQUIRED" not in youtube_transcript:
+            transcript = youtube_transcript
+            st.write("✅ YouTube transcript retrieved automatically!")
+        else:
+            st.write("⚠️ Automatic YouTube transcription failed")
+    
+    # Fallback to TranscriptAPI for non-YouTube or if YouTube failed
+    if not transcript and transcript_service and platform != "YouTube":
+        transcript = transcript_service.transcribe_and_wait(video_url)
+        if transcript:
+            st.write("✅ Transcript retrieved via TranscriptAPI!")
+    
+    # Manual transcription fallback
+    if not transcript:
+        st.error("❌ Automatic transcription failed")
+        status.update(label="Manual transcription required", state="error")
+        
+        st.markdown("### 📝 Manual Transcription Required")
+        
+        if platform == "YouTube":
+            st.info(f"""
+            **YouTube URL:** `{video_url}`
+            
+            Please get the transcript manually:
+            1. Visit [youtubetotranscript.com](https://youtubetotranscript.com/)
+            2. Paste the URL above
+            3. Copy the transcript and paste it below
+            """)
+        
+        manual_transcript = st.text_area(
+            "Paste transcript here:",
+            height=200,
+            placeholder="Paste the meeting transcript here...",
+            key="manual_transcript_processing"
+        )
+        
+        if manual_transcript and st.button("✅ Use Manual Transcript", key="use_manual_processing"):
+            return manual_transcript
+        
+        return None
+    
+    return transcript
+
+
 def chat_with_ai(summarizer, summary, meeting_title, transcript=None, additional_context=None):
     """Handle the chat interface with OpenAI with full context."""
     
@@ -65,7 +120,7 @@ Provide comprehensive, accurate responses based on this complete information."""
     if chat_key not in st.session_state:
         st.session_state[chat_key] = [
             {"role": "system", "content": system_context},
-            {"role": "assistant", "content": f"# 📋 {meeting_title} Summary\n\n{summary}\n\n---\n\n💬 **I've analyzed this meeting in detail and have access to the complete transcript and all supporting documents. Feel free to ask me any follow-up questions about specific discussions, decisions, quotes, or background context!**"}
+            {"role": "assistant", "content": f"# 📋 {meeting_title} Summary\n\n{summary}\n\n---\n\n💬 **Feel free to ask me any follow-up questions about this meeting!**"}
         ]
     
     # Display chat messages (skip system message)
@@ -131,17 +186,21 @@ Provide comprehensive, accurate responses based on this complete information."""
                 # Reset to initial state with full context
                 st.session_state[chat_key] = [
                     {"role": "system", "content": system_context},
-                    {"role": "assistant", "content": f"# 📋 {meeting_title} Summary\n\n{summary}\n\n---\n\n💬 **I've analyzed this meeting in detail and have access to the complete transcript and all supporting documents. Feel free to ask me any follow-up questions about specific discussions, decisions, quotes, or background context!**"}
+                    {"role": "assistant", "content": f"# 📋 {meeting_title} Summary\n\n{summary}\n\n---\n\n💬 **Please feel free to ask me any follow-up questions about this meeting!**"}
                 ]
                 st.rerun()
 
 def main():
     st.title("Snoqualmie City Meeting Summarizer")
     st.markdown("""
-                Select a meeting below to have AI generate city meeting summary and start a chat!
+                Select a meeting below to have AI (ChatGPT) generate a Snoqualmie city meeting summary and start a chat!
                 *This application uses available YouTube video recordings, 
                 meeting minutes, agendas, and packets to produce comprehensive meeting summaries.
-                You are then able to ask follow up questions and save the chat.*
+                You are then able to ask follow up questions and save the chat.
+                As with any use of AI, there may be errors.
+                This tool can be used for brief summaries of meetings
+                but it should not be used for in depth analysis.
+                Talk to your [Council Members](https://www.snoqualmiewa.gov/526/City-Council)!*
                 """
     )
     st.markdown("---")
@@ -190,14 +249,19 @@ def main():
         st.subheader(f"{meeting.get('title', 'Unknown Meeting')}")
         
         # Start new summary button at the top
-        if st.button("🔄 Summarize Different Meeting", type="secondary"):
+        if st.button("🔄 Summarize Different Meeting", type="secondary", key="new_summary_top"):
             # Clear processing state to allow new selection
-            for key in ['processing_meeting', 'current_summary', 'current_transcript']:
+            for key in ['processing_meeting', 'current_summary', 'current_transcript', 'summary_sources']:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
         
         st.markdown("---")
+        
+        # Show what sources were used for this summary
+        sources_used = st.session_state.get('summary_sources', '')
+        if sources_used:
+            st.info(f"📊 **Summary based on:** {sources_used}")
         
         # AI Chat Interface with Summary as First Message
         st.header("Meeting Analysis & Discussion")
@@ -237,9 +301,9 @@ def main():
         )
         
         # Add button to start new summary
-        if st.button("� Summarize Different Meeting", type="secondary"):
+        if st.button("🔄 Summarize Different Meeting", type="secondary", key="new_summary_bottom"):
             # Clear processing state to allow new selection
-            for key in ['processing_meeting', 'current_summary', 'current_transcript']:
+            for key in ['processing_meeting', 'current_summary', 'current_transcript', 'summary_sources']:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
@@ -253,7 +317,7 @@ def main():
         
         # Allow cancellation
         if st.button("❌ Cancel and Select Different Meeting"):
-            for key in ['processing_meeting', 'current_summary', 'current_transcript']:
+            for key in ['processing_meeting', 'current_summary', 'current_transcript', 'summary_sources']:
                 if key in st.session_state:
                     del st.session_state[key]
             st.rerun()
@@ -275,97 +339,79 @@ def main():
             # Update processing meeting with full details
             st.session_state['processing_meeting'] = details
             
+            # Analyze meeting but proceed with summary regardless of timing
+            analysis = scraper.analyze_meeting_status(details)
+            
+            # Always attempt to generate a summary regardless of meeting timing
+            # Try to process the meeting - start with video, fall back to documents
+            summary = None
+            sources_used = []
+            
+            # Try video first
             video_url = details.get('video_url', '')
-            if not video_url:
-                st.error("❌ No video URL found for this meeting")
-                if 'processing_meeting' in st.session_state:
-                    del st.session_state['processing_meeting']
-                st.stop()
-            
-            st.write("📝 Getting transcript...")
-            
-            transcript = None
-            
-            # Try YouTube transcript service first
-            platform = scraper.get_video_platform(video_url)
-            if platform == "YouTube":
-                youtube_transcript = youtube_service.get_transcript(video_url)
+            if video_url:
+                st.write("📝 Attempting to get video transcript...")
+                transcript = get_transcript(video_url, scraper, transcript_service, youtube_service, status)
                 
-                if youtube_transcript and "MANUAL TRANSCRIPTION REQUIRED" not in youtube_transcript:
-                    transcript = youtube_transcript
-                    st.write("✅ YouTube transcript retrieved automatically!")
-                else:
-                    st.write("⚠️ Automatic YouTube transcription failed")
-            
-            # Fallback to TranscriptAPI for non-YouTube or if YouTube failed
-            if not transcript and transcript_service and platform != "YouTube":
-                transcript = transcript_service.transcribe_and_wait(video_url)
                 if transcript:
-                    st.write("✅ Transcript retrieved via TranscriptAPI!")
-            
-            # Manual transcription fallback
-            if not transcript:
-                st.error("❌ Automatic transcription failed")
-                status.update(label="Manual transcription required", state="error")
-                
-                st.markdown("### 📝 Manual Transcription Required")
-                
-                if platform == "YouTube":
-                    st.info(f"""
-                    **YouTube URL:** `{video_url}`
+                    st.session_state['current_transcript'] = transcript
+                    sources_used.append("Video transcript")
                     
-                    Please get the transcript manually:
-                    1. Visit [youtubetotranscript.com](https://youtubetotranscript.com/)
-                    2. Paste the URL above
-                    3. Copy the transcript and paste it below
-                    """)
+                    st.write("🤖 Generating summary from video...")
+                    
+                    # Include document context if available
+                    additional_context = ""
+                    documents = details.get('documents', [])
+                    if documents:
+                        additional_context = scraper.get_document_context(documents, max_docs=3)
+                        if additional_context:
+                            sources_used.append(f"{min(len(documents), 3)} meeting documents")
+                    
+                    summary = summarizer.generate_summary(
+                        meeting_title=details.get('title', ''),
+                        meeting_date=details.get('date', ''),
+                        transcript=transcript,
+                        additional_context=additional_context,
+                        documents=documents
+                    )
+            
+            # If video failed, try documents only
+            if not summary:
+                st.write("📄 Attempting document-based summary...")
+                documents = details.get('documents', [])
                 
-                manual_transcript = st.text_area(
-                    "Paste transcript here:",
-                    height=200,
-                    placeholder="Paste the meeting transcript here...",
-                    key="manual_transcript_processing"
-                )
-                
-                if manual_transcript and st.button("✅ Use Manual Transcript", key="use_manual_processing"):
-                    transcript = manual_transcript
-                    st.rerun()
-                
-                st.stop()
-            
-            # Store transcript
-            st.session_state['current_transcript'] = transcript
-            
-            st.write("🤖 Generating AI summary...")
-            
-            # Include document context
-            additional_context = ""
-            documents = details.get('documents', [])
-            if documents:
-                additional_context = scraper.get_document_context(documents, max_docs=3)
-                if additional_context:
-                    st.write(f"📄 Including {min(len(documents), 3)} document(s) for context")
-                else:
-                    st.write("📄 Documents found but couldn't be processed for context")
-            else:
-                st.write("📄 No documents found - generating summary from transcript only")
-            
-            # Generate summary
-            summary = summarizer.summarize_meeting(
-                transcript=transcript,
-                meeting_title=details.get('title', ''),
-                meeting_date=details.get('date', ''),
-                additional_context=additional_context
-            )
+                if documents:
+                    additional_context = scraper.get_document_context(documents, max_docs=5)
+                    if additional_context:
+                        # Check if we have minutes or just agenda
+                        has_minutes = any('minutes' in doc.get('title', '').lower() for doc in documents)
+                        
+                        if has_minutes:
+                            sources_used = ["Meeting minutes and documents"]
+                            summary = summarizer.generate_summary(
+                                meeting_title=details.get('title', ''),
+                                meeting_date=details.get('date', ''),
+                                additional_context=additional_context,
+                                documents=documents
+                            )
+                        else:
+                            sources_used = ["Meeting agenda only"]
+                            summary = summarizer.generate_summary(
+                                meeting_title=details.get('title', ''),
+                                meeting_date=details.get('date', ''),
+                                additional_context=additional_context,
+                                documents=documents
+                            )
             
             if not summary:
-                st.error("❌ Failed to generate summary")
+                st.error("❌ Failed to generate summary from any available sources")
                 if 'processing_meeting' in st.session_state:
                     del st.session_state['processing_meeting']
                 st.stop()
             
-            # Store the completed summary
+            # Store the completed summary and source information
             st.session_state['current_summary'] = summary
+            st.session_state['summary_sources'] = ", ".join(sources_used) if sources_used else "Unknown sources"
             
             status.update(label="Summary completed!", state="complete")
             st.write("✅ Summary generated successfully!")
@@ -405,6 +451,10 @@ def main():
                 if meeting_date and meeting_date != 'Unknown Date':
                     st.write(f"**Date:** {meeting_date}")
                 
+                # Analyze meeting status for preview
+                analysis = scraper.analyze_meeting_status(meeting)
+                strategy = analysis.get('summary_strategy', 'full_summary')
+                
                 # Show document count
                 documents = meeting.get('documents', [])
                 # Only count documents that have both title and URL
@@ -426,8 +476,8 @@ def main():
                     # Don't show document count if none are available
                     pass
                 
-                # Selection button
-                if st.button(f"📝 Generate Meeting Summary", key=f"select_{idx}", type="primary"):
+                # Generate summary button - same for all meetings
+                if st.button("📝 Generate Meeting Summary", key=f"select_{idx}", type="primary"):
                     # Store selected meeting and rerun to start processing
                     st.session_state['processing_meeting'] = meeting
                     st.rerun()

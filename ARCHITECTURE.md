@@ -135,7 +135,7 @@
    - Returns full transcript text
 
 4. **User Action**: Click "Generate Summary"
-   - App calls `SummarizerService.summarize_meeting(transcript, ...)`
+   - App calls `SummarizerService.generate_summary(transcript, ...)`
    - Service constructs prompt with transcript and context
    - Sends to OpenAI GPT-4 API
    - Returns formatted summary

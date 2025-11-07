@@ -94,20 +94,25 @@ class TestSummarizerService(unittest.TestCase):
         self.assertIsNotNone(self.service.client)
         self.assertEqual(self.service.model, "gpt-4o-mini")
     
-    def test_build_summary_prompt(self):
-        """Test prompt building."""
-        prompt = self.service._build_summary_prompt(
-            transcript="Test transcript",
+    def test_build_unified_prompt(self):
+        """Test unified prompt building."""
+        prompt = self.service._build_unified_prompt(
             meeting_title="Test Meeting",
             meeting_date="2025-01-01",
-            additional_context=""
+            transcript="Test transcript",
+            additional_context="Test context",
+            has_transcript=True,
+            has_documents=False,
+            has_minutes=False,
+            has_agenda=False,
+            document_count=0
         )
         self.assertIn("Test transcript", prompt)
         self.assertIn("Test Meeting", prompt)
         self.assertIn("2025-01-01", prompt)
     
     @patch('summarizer_service.OpenAI')
-    def test_summarize_meeting_success(self, mock_openai):
+    def test_generate_summary_success(self, mock_openai):
         """Test successful meeting summarization."""
         # Create mock response
         mock_completion = Mock()
@@ -120,7 +125,7 @@ class TestSummarizerService(unittest.TestCase):
         # Replace the client
         self.service.client = mock_client
         
-        result = self.service.summarize_meeting(
+        result = self.service.generate_summary(
             transcript="Test transcript",
             meeting_title="Test Meeting"
         )

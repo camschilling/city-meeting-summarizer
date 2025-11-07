@@ -2,6 +2,8 @@ import requests
 from bs4 import BeautifulSoup
 from typing import List, Dict, Optional
 import re
+from datetime import datetime, timedelta
+from dateutil import parser as date_parser
 
 
 class MeetingScraper:
@@ -351,6 +353,184 @@ class MeetingScraper:
         except Exception as e:
             print(f"Error downloading document: {e}")
             return None
+    
+    def _clean_date_string(self, date_str: str) -> str:
+        """
+        Clean date string by removing extra text that might interfere with parsing.
+        
+        Args:
+            date_str: Raw date string that might contain extra text
+            
+        Returns:
+            Cleaned date string with only relevant date/time information
+        """
+        try:
+            # Remove common extra text patterns
+            patterns_to_remove = [
+                r'Add to your calendar.*',
+                r'Outlook.*',
+                r'\(iCal\).*',
+                r'Google.*',
+                r'Back to calendar.*',
+                r'Download.*',
+                r'Export.*'
+            ]
+            
+            cleaned = date_str
+            for pattern in patterns_to_remove:
+                cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+            
+            # Clean up extra whitespace and dashes
+            cleaned = re.sub(r'\s*-\s*$', '', cleaned)  # Remove trailing dash
+            cleaned = re.sub(r'\s+', ' ', cleaned)  # Normalize whitespace
+            cleaned = cleaned.strip()
+            
+            return cleaned
+            
+        except Exception as e:
+            print(f"Error cleaning date string: {e}")
+            return date_str
+    
+    def analyze_meeting_status(self, meeting: Dict[str, str]) -> Dict[str, any]:
+        """
+        Analyze meeting status based on video availability, documents, and date.
+        
+        Args:
+            meeting: Meeting dictionary with title, date, video_url, and documents
+            
+        Returns:
+            Dictionary with status analysis including:
+            - status: 'future', 'recent_no_video', 'has_video', 'no_video_has_minutes', 'agenda_only'
+            - days_since_meeting: Number of days since meeting (negative if future)
+            - has_video: Boolean
+            - has_minutes: Boolean
+            - has_agenda: Boolean
+            - summary_strategy: String describing how to handle summary
+        """
+        try:
+            # Parse meeting date
+            meeting_date = None
+            date_str = meeting.get('date', '')
+            
+            if date_str:
+                try:
+                    # Clean the date string by removing extra text
+                    cleaned_date = self._clean_date_string(date_str)
+                    
+                    # Try multiple date formats
+                    for fmt in ['%m/%d/%Y', '%m/%d/%y', '%Y-%m-%d', '%d/%m/%Y']:
+                        try:
+                            meeting_date = datetime.strptime(cleaned_date, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    
+                    # If standard formats don't work, try dateutil parser
+                    if not meeting_date:
+                        meeting_date = date_parser.parse(cleaned_date)
+                        
+                except Exception as e:
+                    print(f"Could not parse date '{date_str}': {e}")
+                    # If we can't parse date, assume it's in the past
+                    meeting_date = datetime.now() - timedelta(days=30)
+            else:
+                # No date provided, assume it's in the past
+                meeting_date = datetime.now() - timedelta(days=30)
+            
+            # Calculate days since meeting
+            now = datetime.now()
+            days_since = (now - meeting_date).days
+            
+            # Check for video availability
+            has_video = bool(meeting.get('video_url', '').strip())
+            
+            # Check for documents
+            documents = meeting.get('documents', [])
+            has_minutes = any('minutes' in doc.get('title', '').lower() for doc in documents)
+            has_agenda = any('agenda' in doc.get('title', '').lower() for doc in documents)
+            
+            # Determine status and strategy
+            if days_since < 0:
+                # Future meeting
+                status = 'future'
+                summary_strategy = 'notify_future'
+            elif days_since <= 1 and not has_video:
+                # Recent meeting (0-1 days) without video
+                status = 'recent_no_video' 
+                summary_strategy = 'notify_recent'
+            elif has_video:
+                # Has video - normal processing
+                status = 'has_video'
+                summary_strategy = 'full_summary'
+            elif not has_video and has_minutes and days_since > 1:
+                # No video but has minutes, older than 1 day
+                status = 'no_video_has_minutes'
+                summary_strategy = 'document_based'
+            elif not has_video and not has_minutes and days_since > 2:
+                # No video, no minutes, older than 2 days
+                status = 'agenda_only'
+                summary_strategy = 'agenda_only'
+            else:
+                # Fallback case - treat as recent without video
+                status = 'recent_no_video'
+                summary_strategy = 'notify_recent'
+            
+            return {
+                'status': status,
+                'days_since_meeting': days_since,
+                'meeting_date': meeting_date,
+                'has_video': has_video,
+                'has_minutes': has_minutes,
+                'has_agenda': has_agenda,
+                'summary_strategy': summary_strategy,
+                'document_count': len(documents)
+            }
+            
+        except Exception as e:
+            print(f"Error analyzing meeting status: {e}")
+            return {
+                'status': 'unknown',
+                'days_since_meeting': 0,
+                'meeting_date': None,
+                'has_video': False,
+                'has_minutes': False,
+                'has_agenda': False,
+                'summary_strategy': 'full_summary',
+                'document_count': 0
+            }
+    
+    def get_status_message(self, analysis: Dict[str, any], meeting_title: str = "Meeting") -> str:
+        """
+        Generate user-friendly status message based on meeting analysis.
+        
+        Args:
+            analysis: Result from analyze_meeting_status()
+            meeting_title: Title of the meeting
+            
+        Returns:
+            Status message string
+        """
+        strategy = analysis.get('summary_strategy', 'full_summary')
+        days_since = analysis.get('days_since_meeting', 0)
+        
+        if strategy == 'notify_future':
+            return f"⏳ **{meeting_title}** appears to be scheduled for the future. The meeting may not have taken place yet."
+            
+        elif strategy == 'notify_recent':
+            if days_since == 0:
+                return f"🔄 **{meeting_title}** took place today but no video is available yet. The video may still be processing or uploading."
+            else:
+                return f"🔄 **{meeting_title}** took place {days_since} day(s) ago but no video is available yet. The video may still be processing or uploading."
+                
+        elif strategy == 'document_based':
+            doc_count = analysis.get('document_count', 0)
+            return f"📄 **{meeting_title}** has no video available, but meeting minutes and other documents ({doc_count} total) are available. The summary will be based on available meeting documents."
+            
+        elif strategy == 'agenda_only':
+            return f"📋 **{meeting_title}** has no video or minutes available. The summary will be based solely on the meeting agenda to show what was planned for discussion."
+            
+        else:  # full_summary
+            return f"🎥 **{meeting_title}** has video available. Generating comprehensive summary from video transcript and documents."
     
     def get_document_context(self, documents: List[Dict[str, str]], max_docs: int = 3) -> str:
         """
