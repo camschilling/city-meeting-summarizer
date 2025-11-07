@@ -10,6 +10,20 @@ from youtube_transcript_service import YouTubeTranscriptService
 # Load environment variables
 load_dotenv()
 
+def get_api_key(key_name: str, required: bool = True) -> str:
+    """Get API key from Streamlit secrets or environment variables."""
+    # Try Streamlit secrets first (for cloud deployment)
+    if hasattr(st, 'secrets') and key_name in st.secrets:
+        return st.secrets[key_name]
+    
+    # Fallback to environment variables (for local development)
+    value = os.getenv(key_name)
+    if required and not value:
+        st.error(f"⚠️ {key_name} not configured in secrets or environment!")
+        return None
+    
+    return value
+
 # Page configuration
 st.set_page_config(
     page_title="City Meeting Summarizer",
@@ -21,9 +35,9 @@ st.set_page_config(
 @st.cache_resource
 def init_services():
     """Initialize all services with API keys."""
-    openai_key = os.getenv('OPENAI_API_KEY')
-    transcript_key = os.getenv('TRANSCRIPTAPI_KEY')
-    transcript_url = os.getenv('TRANSCRIPTAPI_URL', 'https://api.transcriptapi.com/v1')
+    openai_key = get_api_key('OPENAI_API_KEY', required=True)
+    transcript_key = get_api_key('TRANSCRIPTAPI_KEY', required=False)
+    transcript_url = get_api_key('TRANSCRIPTAPI_URL', required=False) or 'https://api.transcriptapi.com/v1'
     
     scraper = MeetingScraper()
     transcript_service = TranscriptService(transcript_key, transcript_url) if transcript_key else None
@@ -206,8 +220,8 @@ def main():
     st.markdown("---")
     
     # Check API keys
-    openai_key = os.getenv('OPENAI_API_KEY')
-    transcript_key = os.getenv('TRANSCRIPTAPI_KEY')
+    openai_key = get_api_key('OPENAI_API_KEY', required=True)
+    transcript_key = get_api_key('TRANSCRIPTAPI_KEY', required=False)
     
     if not openai_key:
         st.error("⚠️ OpenAI API key not configured!")
