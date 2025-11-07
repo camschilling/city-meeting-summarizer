@@ -242,3 +242,115 @@ class SummarizerService:
         except Exception as e:
             print(f"Error extracting action items: {e}")
             return None
+    
+    def create_chat_context(
+        self,
+        summary: str,
+        meeting_title: str = "",
+        meeting_date: str = "",
+        transcript: str = "",
+        additional_context: str = "",
+        documents: List[Dict[str, str]] = None,
+        sources_used: str = ""
+    ) -> str:
+        """
+        Create comprehensive chat context using the same logic as summary generation.
+        
+        Args:
+            summary: The generated meeting summary
+            meeting_title: Title of the meeting
+            meeting_date: Date of the meeting
+            transcript: Full transcript (if available)
+            additional_context: Additional context from documents
+            documents: List of document dictionaries
+            sources_used: String describing what sources were used for the summary
+            
+        Returns:
+            Comprehensive system context string for chat
+        """
+        # Build comprehensive system context with all available information
+        context_parts = []
+        context_parts.append(f"MEETING SUMMARY:\n{summary}")
+        
+        if transcript and transcript.strip():
+            context_parts.append(f"FULL MEETING TRANSCRIPT:\n{transcript}")
+        else:
+            context_parts.append("MEETING TRANSCRIPT: Not available")
+        
+        if additional_context and additional_context.strip():
+            context_parts.append(f"MEETING DOCUMENTS AND CONTEXT:\n{additional_context}")
+        else:
+            context_parts.append("MEETING DOCUMENTS: No additional documents were available")
+        
+        # Add document URLs for reference
+        if documents:
+            valid_docs = [doc for doc in documents if doc.get('title') and doc.get('url')]
+            if valid_docs:
+                doc_list = []
+                for doc in valid_docs:
+                    doc_list.append(f"- {doc['title']}: {doc['url']}")
+                context_parts.append(f"DOCUMENT REFERENCES:\n" + "\n".join(doc_list))
+        
+        # Add sources information
+        if sources_used:
+            context_parts.append(f"SOURCES USED FOR THIS SUMMARY: {sources_used}")
+        
+        # Add meeting metadata
+        if meeting_title:
+            context_parts.append(f"MEETING TITLE: {meeting_title}")
+        if meeting_date:
+            context_parts.append(f"MEETING DATE: {meeting_date}")
+        
+        system_context = f"""You are an AI assistant with complete access to a city meeting's information. You have:
+
+{chr(10).join(context_parts)}
+
+You can answer detailed questions about:
+- Specific quotes and statements from the transcript
+- Context around decisions and discussions  
+- Background information from meeting documents
+- Detailed analysis of topics discussed
+- Action items and their context
+- Public comments and concerns raised
+- Voting records and rationale
+- References to specific documents and their content
+
+When referencing information, cite your sources (transcript, specific documents, etc.).
+Provide comprehensive, accurate responses based on this complete information."""
+        
+        return system_context
+    
+    def chat_response(
+        self,
+        user_message: str,
+        chat_history: List[Dict[str, str]],
+        temperature: float = 0.3,
+        max_tokens: int = 1000
+    ) -> Optional[str]:
+        """
+        Generate a chat response based on the conversation history.
+        
+        Args:
+            user_message: The user's question/message
+            chat_history: List of previous messages in the conversation
+            temperature: Response creativity (0.0-1.0)
+            max_tokens: Maximum response length
+            
+        Returns:
+            AI response or None if failed
+        """
+        try:
+            # Add the user message to history for this request
+            messages = chat_history + [{"role": "user", "content": user_message}]
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error generating chat response: {e}")
+            return None
