@@ -207,9 +207,10 @@ Provide comprehensive, accurate responses based on this complete information."""
 def main():
     st.title("Snoqualmie City Meeting Summarizer")
     st.markdown("""
-                Select a meeting below to have AI (ChatGPT) generate a Snoqualmie city meeting summary and start a chat!
+                Select a meeting below to have AI (ChatGPT) generate a recent Snoqualmie city meeting summary and start a chat!
                 *This application uses available YouTube video recordings, 
                 meeting minutes, agendas, and packets to produce comprehensive meeting summaries.
+                Only the most recent 25 meetings are available.
                 You are then able to ask follow up questions and save the chat.
                 As with any use of AI, there may be errors.
                 This tool can be used for brief summaries of meetings
@@ -511,6 +512,18 @@ def main():
                 st.success("✅ **TranscriptAPI** configured")
             else:
                 st.warning("⚠️ **TranscriptAPI** not configured")
+
+    # Contact information
+    st.markdown("---")
+    st.markdown("### 📧 Questions or Issues?")
+    st.markdown("""
+    If you have questions, encounter any issues, or have suggestions for improvement, 
+    please feel free to reach out:
+    
+    **Contact:** [cam.schilling@gmail.com](mailto:cam.schilling@gmail.com)
+    
+    *This tool is designed to help citizens stay informed about local government decisions.*
+    """)
 
 
 if __name__ == "__main__":
