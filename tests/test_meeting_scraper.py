@@ -163,7 +163,8 @@ class TestMeetingScraper:
         
         assert details['title'] == "City Council Meeting"
         assert details['date'] == "01/15/2024"
-        assert details['video_url'] == "/videos/meeting123.mp4"
+        # Video URL should be converted to absolute URL
+        assert details['video_url'] == f"{self.base_url}/videos/meeting123.mp4"
         assert len(details['documents']) == 2
         assert details['documents'][0]['title'] == "Meeting Agenda"
         assert details['documents'][0]['url'] == f"{self.base_url}/docs/agenda.pdf"
@@ -206,7 +207,8 @@ class TestMeetingScraper:
         
         details = self.scraper.get_meeting_details("https://example.com/meeting/123")
         
-        assert details['video_url'] == "/videos/meeting.mp4"
+        # Video URL should be converted to absolute URL
+        assert details['video_url'] == f"{self.base_url}/videos/meeting.mp4"
     
     @patch('meeting_scraper.requests.Session.get')
     def test_get_meeting_details_network_error(self, mock_get):
@@ -250,3 +252,95 @@ class TestMeetingScraper:
         content = self.scraper.download_document("https://example.com/doc.pdf")
         
         assert content is None
+    
+    def test_get_document_context_with_documents(self):
+        """Test document context generation with various document types."""
+        documents = [
+            {'title': 'Meeting Agenda', 'url': 'https://example.com/agenda.html'},
+            {'title': 'Council Packet', 'url': 'https://example.com/packet.pdf'},
+            {'title': 'Meeting Minutes', 'url': 'https://example.com/minutes.html'}
+        ]
+        
+        context = self.scraper.get_document_context(documents)
+        
+        # Check basic structure
+        assert context.startswith("Meeting Documents Available:")
+        assert "- Meeting Agenda: https://example.com/agenda.html" in context
+        assert "- Council Packet: https://example.com/packet.pdf" in context
+        assert "- Meeting Minutes: https://example.com/minutes.html" in context
+        assert "Please access and review these documents" in context
+    
+    def test_get_document_context_no_documents(self):
+        """Test document context generation with no documents."""
+        documents = []
+        
+        context = self.scraper.get_document_context(documents)
+        
+        assert context == ""
+    
+    def test_get_document_context_missing_documents_key(self):
+        """Test document context generation when documents key is missing."""
+        # Test with empty dictionary as input since method expects a list
+        context = self.scraper.get_document_context({})
+        
+        assert context == ""
+    
+    def test_get_document_context_with_type_detection(self):
+        """Test document context with automatic type detection."""
+        documents = [
+            {'title': 'Agenda', 'url': 'https://example.com/agenda.pdf'},
+            {'title': 'Minutes', 'url': 'https://example.com/minutes.html'},
+            {'title': 'Report', 'url': 'https://example.com/report.doc'}
+        ]
+        
+        context = self.scraper.get_document_context(documents)
+        
+        # Check that documents are included in the output
+        assert "- Agenda: https://example.com/agenda.pdf" in context
+        assert "- Minutes: https://example.com/minutes.html" in context
+        assert "- Report: https://example.com/report.doc" in context
+    
+    def test_get_document_context_url_formatting(self):
+        """Test that document URLs are properly formatted."""
+        documents = [
+            {'title': 'Test Document', 'url': '/relative/path/doc.pdf'},
+            {'title': 'Full URL Document', 'url': 'https://example.com/doc.pdf'}
+        ]
+        
+        context = self.scraper.get_document_context(documents)
+        
+        # Both relative and absolute URLs should be preserved as-is
+        assert "- Test Document: /relative/path/doc.pdf" in context
+        assert "- Full URL Document: https://example.com/doc.pdf" in context
+    
+    def test_get_document_context_empty_title(self):
+        """Test document context with empty titles."""
+        documents = [
+            {'title': '', 'url': 'https://example.com/doc1.pdf'},
+            {'title': 'Valid Title', 'url': 'https://example.com/doc2.pdf'}
+        ]
+        
+        context = self.scraper.get_document_context(documents)
+        
+        # Should handle empty titles gracefully
+        assert "Meeting Documents Available:" in context
+        assert "https://example.com/doc1.pdf" in context
+        assert "https://example.com/doc2.pdf" in context
+        assert "- Valid Title: https://example.com/doc2.pdf" in context
+    
+    def test_get_document_context_max_docs_limit(self):
+        """Test that max_docs parameter limits the number of documents."""
+        documents = [
+            {'title': 'Doc 1', 'url': 'https://example.com/doc1.pdf'},
+            {'title': 'Doc 2', 'url': 'https://example.com/doc2.pdf'},
+            {'title': 'Doc 3', 'url': 'https://example.com/doc3.pdf'},
+            {'title': 'Doc 4', 'url': 'https://example.com/doc4.pdf'},
+        ]
+        
+        context = self.scraper.get_document_context(documents, max_docs=2)
+        
+        # Should only include 2 documents
+        assert "- Doc 1: https://example.com/doc1.pdf" in context
+        assert "- Doc 2: https://example.com/doc2.pdf" in context
+        assert "https://example.com/doc3.pdf" not in context
+        assert "https://example.com/doc4.pdf" not in context
