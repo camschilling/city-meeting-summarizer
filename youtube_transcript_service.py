@@ -85,7 +85,7 @@ class YouTubeTranscriptService:
                         full_text = ' '.join([snippet.text for snippet in transcript_data])
                         print(f"✅ Successfully retrieved transcript in {transcript.language} ({len(full_text)} characters)")
                         return full_text
-                    except:
+                    except Exception:
                         continue
                         
             except Exception as e:
